@@ -85,7 +85,10 @@ pub type Compound = HashMap<String, Nbt>;
 
 impl Nbt {
     pub fn from_reader<R: Read>(r: R) -> NbtReaderResult<Nbt> {
-        Ok(NbtReader::new(r).tag()?.unwrap().0)
+        Ok(NbtReader::new(r)
+            .tag()?
+            .ok_or_else(|| NbtReaderError::Other("unexpected end tag".into()))?
+            .0)
     }
 
     pub fn from_gzip(data: &[u8]) -> NbtReaderResult<Nbt> {
@@ -178,6 +181,7 @@ pub type NbtReaderResult<T> = Result<T, NbtReaderError>;
 pub enum NbtReaderError {
     Io(io::Error),
     Utf8(string::FromUtf8Error),
+    Other(String),
 }
 
 impl From<io::Error> for NbtReaderError {
@@ -232,6 +236,10 @@ impl<R: Read> NbtReader<R> {
 
     fn string(&mut self) -> NbtReaderResult<String> {
         let len = self.reader.read_u16::<BigEndian>()? as usize;
+        #[cfg(fuzzing)]
+        if len > 16 {
+            return Err(NbtReaderError::Other("string too large".into()));
+        }
         let mut v = Vec::with_capacity(len);
         for _ in 0..len {
             let mut c = [0];
@@ -243,6 +251,10 @@ impl<R: Read> NbtReader<R> {
 
     fn array_u8(&mut self) -> NbtReaderResult<Vec<u8>> {
         let len = self.i32()? as usize;
+        #[cfg(fuzzing)]
+        if len > 16 {
+            return Err(NbtReaderError::Other("byte array too large".into()));
+        }
         let mut v = Vec::with_capacity(len);
         for _ in 0..len {
             let mut c = [0];
@@ -257,6 +269,10 @@ impl<R: Read> NbtReader<R> {
         F: FnMut(&mut NbtReader<R>) -> NbtReaderResult<T>,
     {
         let len = self.i32()? as usize;
+        #[cfg(fuzzing)]
+        if len > 16 {
+            return Err(NbtReaderError::Other("array too large".into()));
+        }
         let mut v = Vec::with_capacity(len);
         for _ in 0..len {
             v.push(read(self)?)
@@ -275,7 +291,9 @@ impl<R: Read> NbtReader<R> {
     fn list(&mut self) -> NbtReaderResult<List> {
         match self.i8()? {
             TAG_END => {
-                assert_eq!(self.i32()?, 0);
+                if self.i32()? != 0 {
+                    return Err(NbtReaderError::Other("incorrect ending tag".into()));
+                }
                 Ok(List::Compound(Vec::new()))
             }
             TAG_BYTE => self.array(|r| r.i8()).map(List::Byte),
@@ -289,7 +307,12 @@ impl<R: Read> NbtReader<R> {
             TAG_STRING => self.array(|r| r.string()).map(List::String),
             TAG_LIST => self.array(|r| r.list()).map(List::List),
             TAG_COMPOUND => self.array(|r| r.compound()).map(List::Compound),
-            tag_type => panic!("Unexpected tag type {}", tag_type),
+            tag_type => {
+                return Err(NbtReaderError::Other(format!(
+                    "Unexpected tag type {}",
+                    tag_type
+                )))
+            }
         }
     }
 
@@ -311,7 +334,12 @@ impl<R: Read> NbtReader<R> {
                         TAG_STRING => self.string().map(Nbt::String),
                         TAG_LIST => self.list().map(Nbt::List),
                         TAG_COMPOUND => self.compound().map(Nbt::Compound),
-                        tag_type => panic!("Unexpected tag type {}", tag_type),
+                        tag_type => {
+                            return Err(NbtReaderError::Other(format!(
+                                "Unexpected tag type {}",
+                                tag_type
+                            )))
+                        }
                     }?,
                     name,
                 ))
