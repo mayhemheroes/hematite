@@ -1,0 +1,7 @@
+project: hematite
+target: nbt
+
+cmds:
+  - cmd: /nbt
+  - cmd: /nbt_no_inst @@
+    libfuzzer: false
