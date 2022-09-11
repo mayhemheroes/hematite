@@ -20,6 +20,10 @@ debug = false
 name = "hematite"
 path = "src/main.rs"
 
+[lib]
+name = "hematite"
+path = "src/lib.rs"
+
 [dependencies]
 byteorder = "1.4.3"
 camera_controllers = "0.27.0"
